@@ -1,0 +1,13 @@
+# Commencement switch (SPEC-zero-hour.md, section 3).
+# EMPTY = the era has not commenced; the bot runs countdown/overtime normally.
+#
+# To declare commencement (the only acceptable reason the clock stops):
+#   anchored to official measurement — World Bank PIP / the UN SDG report
+#   confirming the end of extreme poverty everywhere on the planet — add a
+#   single line below with the MEASURED day (not the day anyone remembered),
+#   in ISO form, and cite the source in the commit message:
+#
+#       2030-11-14
+#
+# On the next run the bot posts the one-time commencement record, then daily
+# posts stop; the summons thereafter speaks the record line.

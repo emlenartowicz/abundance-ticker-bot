@@ -19,6 +19,25 @@ else — no unsolicited replies, no engagement mechanics, no generative step):
 Everything the bot says is canonical text, identical to what the site's
 Broadcast panel composes.
 
+## Three states (SPEC-zero-hour.md)
+
+One instrument, three positions — the definition never changes (it carries no
+date, so lateness measures lateness and never expires the challenge):
+
+- **Countdown** — before the deadline: `{n} days remain.`
+- **Overtime** — automatic after the deadline, if the era has not commenced:
+  `{n} days past the deadline.` The daily post and the summons both switch; no
+  human hands required.
+- **Commenced** — the human switch. Put the measured ISO date in
+  `commenced.txt` (cite the World Bank PIP / UN SDG source in the commit). The
+  bot posts one commencement record, daily posts stop, and the summons
+  thereafter speaks the record line.
+
+The **annual reality check** (`reality-check.yml`, mid-September) posts the
+canonical data-day line — with link facets to the UN SDG progress report and
+the World Bank poverty data, HTTP-checked before posting — and opens a private
+issue asking whether the page is still telling the truth.
+
 ## How it runs
 
 No server. Four GitHub Actions workflows (all also `workflow_dispatch`):
@@ -29,6 +48,7 @@ No server. Four GitHub Actions workflows (all also `workflow_dispatch`):
 | `mentions.yml` | `*/15 * * * *` | `python bot.py mentions` |
 | `discover.yml` | `43 20 * * *` | `python bot.py discover` |
 | `digest.yml` | `0 8 * * 1` | `python bot.py digest` |
+| `reality-check.yml` | `0 12 15 9 *` | `python bot.py reality-check` |
 
 Python 3.11, standard library + `requests`. AT Protocol over plain HTTPS
 against `https://bsky.social`. Failure emails from Actions are the monitoring
@@ -46,11 +66,12 @@ an issue and by discover to commit `follows.log`).
 
 ## Files
 
-- `bot.py` — the whole bot (`post` / `mentions` / `discover` / `digest`;
-  each takes `--dry-run`).
+- `bot.py` — the whole bot (`post` / `mentions` / `discover` / `digest` /
+  `reality-check`; each takes `--dry-run`).
 - `queries.txt` — discovery search terms, one per line, editable without code.
 - `never-again.txt` — handles/DIDs discovery must never follow.
 - `follows.log` — append-only follow record (`date handle did`).
+- `commenced.txt` — the commencement switch (empty until the era commences).
 
 ## Guardrails
 
