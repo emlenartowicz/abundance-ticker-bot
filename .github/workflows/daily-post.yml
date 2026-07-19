@@ -1,0 +1,21 @@
+name: Daily post
+# 15:00 Europe/Brussels (cron in UTC; winter hour drifts to 14:00 local and is
+# accepted — the count is computed at runtime and stays correct). SPEC-ticker-bot.
+on:
+  schedule:
+    - cron: "0 13 * * *"
+  workflow_dispatch:
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt
+      - run: python bot.py post
+        env:
+          BSKY_HANDLE: ${{ secrets.BSKY_HANDLE }}
+          BSKY_APP_PASSWORD: ${{ secrets.BSKY_APP_PASSWORD }}

@@ -1,0 +1,2 @@
+requests>=2.31
+tzdata>=2024.1

@@ -1,0 +1,59 @@
+# abundance-ticker-bot
+
+The official automated Bluesky account for **The Abundance Challenge**
+([abundancechallenge.ai](https://www.abundancechallenge.ai)) — handle
+**[@abundancechallenge.ai](https://bsky.app/profile/abundancechallenge.ai)**.
+
+A single, visibly-automated account with exactly three behaviours (nothing
+else — no unsolicited replies, no engagement mechanics, no generative step):
+
+1. **Daily post** — the day-count to 31 December 2030 (the deadline 193 nations
+   set for ending extreme poverty), once a day at 15:00 Europe/Brussels.
+2. **Witness following** — follows accounts substantively posting on AI, the AI
+   economy, and poverty; rate-limited (≤10/day), fully logged, never
+   auto-unfollows.
+3. **Reply on summons** — when a human writes `@abundancechallenge.ai` in a
+   thread, replies once with the canonical count + definition, never a word
+   about the thread.
+
+Everything the bot says is canonical text, identical to what the site's
+Broadcast panel composes.
+
+## How it runs
+
+No server. Four GitHub Actions workflows (all also `workflow_dispatch`):
+
+| Workflow | Schedule (UTC) | Command |
+|---|---|---|
+| `daily-post.yml` | `0 13 * * *` | `python bot.py post` |
+| `mentions.yml` | `*/15 * * * *` | `python bot.py mentions` |
+| `discover.yml` | `43 20 * * *` | `python bot.py discover` |
+| `digest.yml` | `0 8 * * 1` | `python bot.py digest` |
+
+Python 3.11, standard library + `requests`. AT Protocol over plain HTTPS
+against `https://bsky.social`. Failure emails from Actions are the monitoring
+layer — every command fails loudly (non-zero) on anything unexpected, and
+**never truncates** the definition or posts a zero/negative count.
+
+## Secrets (repo → Settings → Secrets and variables → Actions)
+
+- `BSKY_HANDLE` = `abundancechallenge.ai`
+- `BSKY_APP_PASSWORD` = a Bluesky **app password** (Settings → Privacy and
+  security → App passwords), bot-scoped and revocable in one click.
+
+`GITHUB_TOKEN` is provided by Actions automatically (used by the digest to open
+an issue and by discover to commit `follows.log`).
+
+## Files
+
+- `bot.py` — the whole bot (`post` / `mentions` / `discover` / `digest`;
+  each takes `--dry-run`).
+- `queries.txt` — discovery search terms, one per line, editable without code.
+- `never-again.txt` — handles/DIDs discovery must never follow.
+- `follows.log` — append-only follow record (`date handle did`).
+
+## Guardrails
+
+Additive infrastructure only. This repo is separate from the site repo
+(`abundance-challenge`) and from AIC-WG-Tool; it never touches either, and
+never opens the `aicframework.net` DNS zone.

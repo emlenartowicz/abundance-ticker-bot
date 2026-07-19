@@ -1,0 +1,14 @@
+# Witness-following discovery queries (SPEC-ticker-bot, "Witness following").
+# One query per line. Editable without code changes. Lines starting with # ignored.
+extreme poverty
+cash transfers
+SDG 1
+AI economy
+AI and jobs
+UBI
+post-scarcity
+abundance economy
+AI industry
+AI revolution
+AI transition
+AIC Framework

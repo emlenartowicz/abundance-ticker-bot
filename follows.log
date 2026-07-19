@@ -1,0 +1,2 @@
+# Witness-follow log — one line per automated follow: "YYYY-MM-DD handle did".
+# Appended by `bot.py discover` and committed back by the discover workflow.

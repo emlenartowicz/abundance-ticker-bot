@@ -1,0 +1,21 @@
+name: Mentions poll
+# Every 15 minutes: answer unanswered @-summons with the canonical line.
+# Idempotent and rate-limited in bot.py (1/thread, 30/day). SPEC-ticker-bot.
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+jobs:
+  mentions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt
+      - run: python bot.py mentions
+        env:
+          BSKY_HANDLE: ${{ secrets.BSKY_HANDLE }}
+          BSKY_APP_PASSWORD: ${{ secrets.BSKY_APP_PASSWORD }}
