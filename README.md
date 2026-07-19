@@ -8,7 +8,10 @@ A single, visibly-automated account with exactly three behaviours (nothing
 else — no unsolicited replies, no engagement mechanics, no generative step):
 
 1. **Daily post** — the day-count to 31 December 2030 (the deadline 193 nations
-   set for ending extreme poverty), once a day at 15:00 Europe/Brussels.
+   set for ending extreme poverty), once a day at 15:00 Europe/Brussels. The
+   number-free share card (`abundance-challenge-card.png`) rides along as an
+   `app.bsky.embed.external` with an uploaded thumb; the annual data-day post
+   carries it too. Mention replies stay text-only.
 2. **Witness following** — follows accounts substantively posting on AI, the AI
    economy, and poverty; rate-limited (≤10/day), fully logged, never
    auto-unfollows.

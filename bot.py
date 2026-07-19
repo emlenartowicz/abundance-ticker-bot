@@ -40,6 +40,17 @@ MAX_GRAPHEMES = 300          # Bluesky hard limit; never truncate — fail loudl
 TIMEOUT = 30
 COMMENCED_FILE = "commenced.txt"
 
+# The share card, attached to daily posts and the annual data day as an external
+# embed (SPEC amendment 2026-07-19, Em-approved — supersedes the earlier
+# text-only-daily-post rule; mentions replies stay text-only). Number-free, so
+# it never goes stale. Title/description mirror the site's OG tags (canonical).
+CARD_FILE = "abundance-challenge-card.png"
+CARD_TITLE = "Abundance Will Not Distribute Itself"
+CARD_DESC = ("To the builders and implementers of artificial intelligence: the "
+             "universal abundance era commences on the day extreme poverty ends "
+             "— everywhere on the planet. Whatever abundance turns out to mean, "
+             "that is its opening day. It has a deadline.")
+
 # The definition — identical across countdown and overtime (carries no date).
 DEFINITION = ("The universal abundance era commences on the day extreme poverty "
               "ends — everywhere on the planet. Whatever abundance turns out to "
@@ -244,13 +255,37 @@ def api_post(token, method, body):
     return r.json()
 
 
-def create_post(token, did, text, facets, reply=None):
+def create_post(token, did, text, facets, reply=None, embed=None):
     record = {"$type": "app.bsky.feed.post", "text": text,
               "createdAt": now_utc_iso(), "facets": facets, "langs": ["en"]}
     if reply:
         record["reply"] = reply
+    if embed:
+        record["embed"] = embed
     return api_post(token, "com.atproto.repo.createRecord",
                     {"repo": did, "collection": "app.bsky.feed.post", "record": record})
+
+
+def upload_blob(token, path, mime):
+    if not os.path.exists(path):
+        die("Card file {} missing; cannot attach embed.".format(path))
+    with open(path, "rb") as fh:
+        data = fh.read()
+    r = requests.post("{}/xrpc/com.atproto.repo.uploadBlob".format(PDS), data=data,
+                      headers={"Authorization": "Bearer {}".format(token),
+                               "Content-Type": mime}, timeout=TIMEOUT)
+    r.raise_for_status()
+    return r.json()["blob"]
+
+
+def card_embed(token):
+    """app.bsky.embed.external carrying the number-free card as an uploaded thumb.
+    Attached to daily posts and the annual data day; never to mention replies."""
+    return {
+        "$type": "app.bsky.embed.external",
+        "external": {"uri": SITE, "title": CARD_TITLE, "description": CARD_DESC,
+                     "thumb": upload_blob(token, CARD_FILE, "image/png")},
+    }
 
 
 def author_feed(token, did, limit=30, filt=None):
@@ -292,26 +327,26 @@ def cmd_post(args):
     if state[0] == "commenced":
         text, facets = commencement_payload(state[1])
         if args.dry_run:
-            print("[dry-run] commenced; would post record line once:\n" + text)
+            print("[dry-run] commenced; would post record line once (+card):\n" + text)
             return
         token, did = session()
         if feed_has_prefix_ever(token, did, "The universal abundance era commenced on"):
             print("Commenced; commencement post already made. Daily posts retired.")
             return
-        res = create_post(token, did, text, facets)
+        res = create_post(token, did, text, facets, embed=card_embed(token))
         print("Posted commencement record: {}".format(res.get("uri")))
         return
 
     text, facets, prefix = daily_payload(state)
     if args.dry_run:
-        print("[dry-run] {} state; would post ({} graphemes):\n{}"
+        print("[dry-run] {} state; would post ({} graphemes, +card):\n{}"
               .format(state[0], len(text), text))
         return
     token, did = session()
     if feed_has_prefix_today(token, did, prefix):
         print("Today's line already posted ({}); exiting clean.".format(prefix))
         return
-    res = create_post(token, did, text, facets)
+    res = create_post(token, did, text, facets, embed=card_embed(token))
     print("Posted [{}]: {}".format(prefix, res.get("uri")))
 
 
@@ -600,7 +635,7 @@ def cmd_reality_check(args):
 
     text, facets = reality_payload(state, year, sdg_url)
     if args.dry_run:
-        print("[dry-run] would post ({} graphemes):\n{}".format(len(text), text))
+        print("[dry-run] would post ({} graphemes, +card):\n{}".format(len(text), text))
         print("[dry-run] would open issue:", REALITY_ISSUE_TITLE.format(year=year))
         return
 
@@ -608,7 +643,7 @@ def cmd_reality_check(args):
     if feed_has_prefix_ever(token, did, "Annual data day.", year=year):
         print("Annual data day already posted this year; skipping post and issue.")
         return
-    res = create_post(token, did, text, facets)
+    res = create_post(token, did, text, facets, embed=card_embed(token))
     print("Posted annual data day: {}".format(res.get("uri")))
     open_issue(REALITY_ISSUE_TITLE.format(year=year), REALITY_ISSUE_BODY)
 
