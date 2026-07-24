@@ -73,6 +73,8 @@ ADULT_LABELS = {"porn", "sexual", "nudity", "nsfw", "sexual-figurative"}
 
 # Reply-on-summons limits (SPEC-ticker-bot "Reply on summons").
 MAX_REPLIES_PER_DAY = 30
+NOTIF_PAGE_CAP = 8           # bounded pagination: up to 8×50 = 400 notifications
+NOTIF_LOOKBACK_DAYS = 3      # stop paging once notifications predate this window
 
 
 # --------------------------------------------------------------------------- #
@@ -376,26 +378,63 @@ def count_todays_replies(token, did):
     return n
 
 
+def is_summons(notif, did):
+    """True if this notification is a summons — the bot @-mentioned in a post.
+
+    Bluesky files a standalone/third-party mention as reason 'mention', but a
+    reply to the bot's OWN post that also @-mentions it as reason 'reply'. The
+    old reason=='mention'-only filter silently dropped the latter. Replies with
+    no mention facet, quote-posts, likes and follows carry no bot mention and
+    are ignored, per spec ("no other trigger exists")."""
+    reason = notif.get("reason")
+    if reason == "mention":
+        return True
+    if reason == "reply":
+        for facet in (notif.get("record") or {}).get("facets") or []:
+            for feat in facet.get("features") or []:
+                if feat.get("$type") == "app.bsky.richtext.facet#mention" \
+                        and feat.get("did") == did:
+                    return True
+    return False
+
+
+def gather_summons(token, did):
+    """Bounded pagination over notifications so a summons buried under newer
+    likes/follows/reposts is still found (a single limit=50 page missed them).
+    Caps at NOTIF_PAGE_CAP pages and stops once notifications predate the
+    lookback window."""
+    cutoff = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=NOTIF_LOOKBACK_DAYS)
+    cursor, pages, summons = None, 0, []
+    while pages < NOTIF_PAGE_CAP:
+        params = {"limit": 50}
+        if cursor:
+            params["cursor"] = cursor
+        res = api_get(token, "app.bsky.notification.listNotifications", params)
+        notifs = res.get("notifications", [])
+        if not notifs:
+            break
+        summons.extend(n for n in notifs if is_summons(n, did))
+        cursor = res.get("cursor")
+        pages += 1
+        oldest = parse_ts(notifs[-1].get("indexedAt"))
+        if not cursor or (oldest and oldest < cutoff):
+            break
+    return summons
+
+
 def cmd_mentions(args):
     text, facets = spoken_line(current_state())
-    token = did = None
-    if not args.dry_run:
-        token, did = session()
-
-    if args.dry_run:
+    if args.dry_run and not (os.environ.get("BSKY_HANDLE")
+                             and os.environ.get("BSKY_APP_PASSWORD")):
         print("[dry-run] would reply with:\n" + text)
-        # still show mention scan if creds are present, else stop here
-        if not (os.environ.get("BSKY_HANDLE") and os.environ.get("BSKY_APP_PASSWORD")):
-            return
-        token, did = session()
+        return
 
-    notifs = api_get(token, "app.bsky.notification.listNotifications",
-                     {"limit": 50}).get("notifications", [])
-    mentions = [n for n in notifs if n.get("reason") == "mention"]
-    todays = 0 if args.dry_run else count_todays_replies(token, did)
+    token, did = session()
+    summons = gather_summons(token, did)
+    todays = count_todays_replies(token, did)
     replied_roots, made = set(), 0
 
-    for n in mentions:
+    for n in summons:
         uri, cid = n.get("uri"), n.get("cid")
         reply_ref = (n.get("record") or {}).get("reply") or {}
         root = reply_ref.get("root") or {"uri": uri, "cid": cid}
@@ -415,7 +454,8 @@ def cmd_mentions(args):
             print("Replied to summons: {}".format(uri))
         replied_roots.add(root.get("uri"))
         made += 1
-    print("Mentions handled: {} new repl{}.".format(made, "y" if made == 1 else "ies"))
+    print("Summons found: {}; new repl{}: {}."
+          .format(len(summons), "y" if made == 1 else "ies", made))
 
 
 # --------------------------------------------------------------------------- #
