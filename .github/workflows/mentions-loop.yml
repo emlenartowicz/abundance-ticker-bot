@@ -1,0 +1,38 @@
+name: Mentions loop
+# Always-on summons poller (SPEC-ticker-bot + Em ruling 2026-07-24). Public repo
+# = unlimited free Actions minutes. One run loops internally, polling mentions
+# every ~60s for ~53 min, then exits so a queued run takes over. The */5 cron is
+# a watchdog: if the loop ever dies (crash, runner starvation), the next tick
+# restarts it. bot.py handles reply logic: once per thread, idempotent, canonical
+# text-only line, bounded pagination, request timeouts, clean idle exit.
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+    inputs:
+      duration_seconds:
+        description: "Loop seconds (test override; blank = ~53 min)"
+        default: ""
+
+# Exactly one loop alive. cancel-in-progress:false keeps the running loop going
+# and queues at most one successor, so a dropped */5 slot self-heals on handoff.
+concurrency:
+  group: mentions-loop
+  cancel-in-progress: false
+
+jobs:
+  loop:
+    runs-on: ubuntu-latest
+    timeout-minutes: 58        # bound the run; watchdog restarts after
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt
+      - run: python bot.py loop
+        env:
+          BSKY_HANDLE: ${{ secrets.BSKY_HANDLE }}
+          BSKY_APP_PASSWORD: ${{ secrets.BSKY_APP_PASSWORD }}
+          LOOP_DURATION_SECONDS: ${{ inputs.duration_seconds || '3180' }}
+          LOOP_INTERVAL_SECONDS: "60"

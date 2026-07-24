@@ -27,6 +27,7 @@ import datetime as dt
 import os
 import re
 import sys
+import time
 from zoneinfo import ZoneInfo
 
 import requests
@@ -75,6 +76,12 @@ ADULT_LABELS = {"porn", "sexual", "nudity", "nsfw", "sexual-figurative"}
 MAX_REPLIES_PER_DAY = 30
 NOTIF_PAGE_CAP = 8           # bounded pagination: up to 8×50 = 400 notifications
 NOTIF_LOOKBACK_DAYS = 3      # stop paging once notifications predate this window
+
+# Always-on loop (public-repo Actions; unlimited free minutes). One run polls
+# for LOOP_DURATION_SECONDS then exits so a queued watchdog run takes over.
+# Overridable via env for testing.
+LOOP_DURATION_SECONDS = int(os.environ.get("LOOP_DURATION_SECONDS", "3180"))  # ~53 min
+LOOP_INTERVAL_SECONDS = int(os.environ.get("LOOP_INTERVAL_SECONDS", "60"))
 
 
 # --------------------------------------------------------------------------- #
@@ -359,7 +366,9 @@ def own_reply_exists(token, did, uri):
     try:
         th = api_get(token, "app.bsky.feed.getPostThread", {"uri": uri, "depth": 1})
     except requests.HTTPError:
-        return False
+        # Can't verify (transient error, or the post was deleted): skip this
+        # round rather than risk a double reply. The loop retries next poll.
+        return True
     for r in th.get("thread", {}).get("replies", []) or []:
         if r.get("post", {}).get("author", {}).get("did") == did:
             return True
@@ -422,17 +431,14 @@ def gather_summons(token, did):
     return summons
 
 
-def cmd_mentions(args):
+def poll_once(token, did, dry_run=False):
+    """One mentions pass. Returns (summons_found, replies_made, cap_hit).
+    Idempotent (skips threads already answered), 1 reply/thread, canonical
+    text-only reply. Shared by the single-shot `mentions` and the `loop`."""
     text, facets = spoken_line(current_state())
-    if args.dry_run and not (os.environ.get("BSKY_HANDLE")
-                             and os.environ.get("BSKY_APP_PASSWORD")):
-        print("[dry-run] would reply with:\n" + text)
-        return
-
-    token, did = session()
     summons = gather_summons(token, did)
     todays = count_todays_replies(token, did)
-    replied_roots, made = set(), 0
+    replied_roots, made, cap_hit = set(), 0, False
 
     for n in summons:
         uri, cid = n.get("uri"), n.get("cid")
@@ -444,9 +450,9 @@ def cmd_mentions(args):
             replied_roots.add(root.get("uri"))
             continue
         if todays + made >= MAX_REPLIES_PER_DAY:
-            die("Daily reply cap ({}) reached; failing loudly rather than flood."
-                .format(MAX_REPLIES_PER_DAY))
-        if args.dry_run:
+            cap_hit = True
+            break
+        if dry_run:
             print("[dry-run] would reply to {}".format(uri))
         else:
             create_post(token, did, text, facets,
@@ -454,8 +460,56 @@ def cmd_mentions(args):
             print("Replied to summons: {}".format(uri))
         replied_roots.add(root.get("uri"))
         made += 1
+    return len(summons), made, cap_hit
+
+
+def cmd_mentions(args):
+    if args.dry_run and not (os.environ.get("BSKY_HANDLE")
+                             and os.environ.get("BSKY_APP_PASSWORD")):
+        text, _ = spoken_line(current_state())
+        print("[dry-run] would reply with:\n" + text)
+        return
+    token, did = session()
+    found, made, cap_hit = poll_once(token, did, args.dry_run)
     print("Summons found: {}; new repl{}: {}."
-          .format(len(summons), "y" if made == 1 else "ies", made))
+          .format(found, "y" if made == 1 else "ies", made))
+    if cap_hit:
+        die("Daily reply cap ({}) reached; failing loudly rather than flood."
+            .format(MAX_REPLIES_PER_DAY))
+
+
+def cmd_loop(args):
+    """Always-on poller: poll every LOOP_INTERVAL_SECONDS for
+    LOOP_DURATION_SECONDS, then exit 0 so a queued watchdog run takes over.
+    Resilient — a transient error is logged and the loop continues (session
+    refreshed); only a hard misconfig (missing creds) exits non-zero."""
+    end = time.monotonic() + LOOP_DURATION_SECONDS
+    print("Mentions loop: polling every {}s for ~{}s."
+          .format(LOOP_INTERVAL_SECONDS, LOOP_DURATION_SECONDS))
+    token = did = None
+    polls = total = 0
+    while time.monotonic() < end:
+        t0 = time.monotonic()
+        try:
+            if token is None:
+                token, did = session()
+            found, made, cap_hit = poll_once(token, did)
+            total += made
+            if made:
+                print("  poll {}: {} summons, {} replied.".format(polls + 1, found, made))
+            if cap_hit:
+                print("  daily reply cap reached; pausing replies until tomorrow.",
+                      file=sys.stderr)
+        except Exception as e:               # noqa: BLE001 — resilient by design
+            print("  poll error (continuing): {!r}".format(e), file=sys.stderr)
+            token = None                     # force a fresh session next iteration
+        polls += 1
+        nap = max(0, LOOP_INTERVAL_SECONDS - (time.monotonic() - t0))
+        if time.monotonic() + nap >= end:
+            break
+        time.sleep(nap)
+    print("Loop window done: {} polls, {} replies. Exiting for handoff."
+          .format(polls, total))
 
 
 # --------------------------------------------------------------------------- #
@@ -695,8 +749,9 @@ def main():
     parser = argparse.ArgumentParser(description="Abundance Challenge ticker bot")
     sub = parser.add_subparsers(dest="cmd", required=True)
     commands = (
-        ("post", cmd_post), ("mentions", cmd_mentions), ("discover", cmd_discover),
-        ("digest", cmd_digest), ("reality-check", cmd_reality_check),
+        ("post", cmd_post), ("mentions", cmd_mentions), ("loop", cmd_loop),
+        ("discover", cmd_discover), ("digest", cmd_digest),
+        ("reality-check", cmd_reality_check),
     )
     for name, fn in commands:
         p = sub.add_parser(name)
