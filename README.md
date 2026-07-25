@@ -48,17 +48,20 @@ No server. Four GitHub Actions workflows (all also `workflow_dispatch`):
 | Workflow | Schedule (UTC) | Command |
 |---|---|---|
 | `daily-post.yml` | `0 13 * * *` | `python bot.py post` |
-| `mentions-loop.yml` | `*/5 * * * *` (watchdog) | `python bot.py loop` |
+| `mentions.yml` | `*/15 * * * *` | `python bot.py mentions` |
 | `discover.yml` | `43 20 * * *` | `python bot.py discover` |
 | `digest.yml` | `0 8 * * 1` | `python bot.py digest` |
 | `reality-check.yml` | `0 12 15 9 *` | `python bot.py reality-check` |
 
-The **mentions loop** is always-on: one run polls every ~60s for ~53 min, then
-exits so a queued run takes over (`concurrency: mentions-loop`,
-`cancel-in-progress: false`). The `*/5` cron is a watchdog that restarts the loop
-if it ever dies. This repo is **public**, so Actions minutes are unlimited and
-free — the always-on cost is nil. (`bot.py mentions` remains as a single-shot for
-manual testing.)
+**Mentions** is a single short scheduled job: each run does one poll and exits
+in ~15s, so normal cycles end in success and never email. It catches both
+`mention`- and `reply`-reason summons, paginates the notification window
+(bounded), and is idempotent (once per thread). Latency is the schedule interval
+(GitHub throttles frequent crons; up-to-an-hour worst case is accepted). Dispatch
+the workflow manually for an instant run. (An always-on internal loop was tried
+and reverted — on GitHub's hosted runners it produced cancellation-email churn
+and intermittent startup failures; a plain scheduled job is startup-clean and
+email-quiet.)
 
 Python 3.11, standard library + `requests`. AT Protocol over plain HTTPS
 against `https://bsky.social`. Failure emails from Actions are the monitoring

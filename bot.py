@@ -27,7 +27,6 @@ import datetime as dt
 import os
 import re
 import sys
-import time
 from zoneinfo import ZoneInfo
 
 import requests
@@ -76,12 +75,6 @@ ADULT_LABELS = {"porn", "sexual", "nudity", "nsfw", "sexual-figurative"}
 MAX_REPLIES_PER_DAY = 30
 NOTIF_PAGE_CAP = 8           # bounded pagination: up to 8×50 = 400 notifications
 NOTIF_LOOKBACK_DAYS = 3      # stop paging once notifications predate this window
-
-# Always-on loop (public-repo Actions; unlimited free minutes). One run polls
-# for LOOP_DURATION_SECONDS then exits so a queued watchdog run takes over.
-# Overridable via env for testing.
-LOOP_DURATION_SECONDS = int(os.environ.get("LOOP_DURATION_SECONDS", "3180"))  # ~53 min
-LOOP_INTERVAL_SECONDS = int(os.environ.get("LOOP_INTERVAL_SECONDS", "60"))
 
 
 # --------------------------------------------------------------------------- #
@@ -478,40 +471,6 @@ def cmd_mentions(args):
             .format(MAX_REPLIES_PER_DAY))
 
 
-def cmd_loop(args):
-    """Always-on poller: poll every LOOP_INTERVAL_SECONDS for
-    LOOP_DURATION_SECONDS, then exit 0 so a queued watchdog run takes over.
-    Resilient — a transient error is logged and the loop continues (session
-    refreshed); only a hard misconfig (missing creds) exits non-zero."""
-    end = time.monotonic() + LOOP_DURATION_SECONDS
-    print("Mentions loop: polling every {}s for ~{}s."
-          .format(LOOP_INTERVAL_SECONDS, LOOP_DURATION_SECONDS))
-    token = did = None
-    polls = total = 0
-    while time.monotonic() < end:
-        t0 = time.monotonic()
-        try:
-            if token is None:
-                token, did = session()
-            found, made, cap_hit = poll_once(token, did)
-            total += made
-            if made:
-                print("  poll {}: {} summons, {} replied.".format(polls + 1, found, made))
-            if cap_hit:
-                print("  daily reply cap reached; pausing replies until tomorrow.",
-                      file=sys.stderr)
-        except Exception as e:               # noqa: BLE001 — resilient by design
-            print("  poll error (continuing): {!r}".format(e), file=sys.stderr)
-            token = None                     # force a fresh session next iteration
-        polls += 1
-        nap = max(0, LOOP_INTERVAL_SECONDS - (time.monotonic() - t0))
-        if time.monotonic() + nap >= end:
-            break
-        time.sleep(nap)
-    print("Loop window done: {} polls, {} replies. Exiting for handoff."
-          .format(polls, total))
-
-
 # --------------------------------------------------------------------------- #
 # discover — witness following
 # --------------------------------------------------------------------------- #
@@ -749,9 +708,8 @@ def main():
     parser = argparse.ArgumentParser(description="Abundance Challenge ticker bot")
     sub = parser.add_subparsers(dest="cmd", required=True)
     commands = (
-        ("post", cmd_post), ("mentions", cmd_mentions), ("loop", cmd_loop),
-        ("discover", cmd_discover), ("digest", cmd_digest),
-        ("reality-check", cmd_reality_check),
+        ("post", cmd_post), ("mentions", cmd_mentions), ("discover", cmd_discover),
+        ("digest", cmd_digest), ("reality-check", cmd_reality_check),
     )
     for name, fn in commands:
         p = sub.add_parser(name)

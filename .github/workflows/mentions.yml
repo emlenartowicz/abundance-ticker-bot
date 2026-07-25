@@ -1,0 +1,29 @@
+name: Mentions poll
+# Answer unanswered @-summons with the canonical line. Single short scheduled
+# job (SPEC-ticker-bot; Em ruling 2026-07-25 — robust over always-on):
+#   - each run does one poll and exits SUCCESS in ~15s, so normal cycles never
+#     email (no concurrency, no watchdog, no cancellations);
+#   - bot.py handles it: catches mention- AND reply-reason summons, bounded
+#     pagination, request timeouts, idempotent (once/thread, 30/day), clean
+#     exit when idle;
+#   - latency is the schedule interval (GitHub may throttle frequent crons;
+#     up-to-an-hour worst case is accepted). Dispatch manually for an instant run.
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+jobs:
+  mentions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5          # fail fast if a run ever wedges; frees the slot
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt
+      - run: python bot.py mentions
+        env:
+          BSKY_HANDLE: ${{ secrets.BSKY_HANDLE }}
+          BSKY_APP_PASSWORD: ${{ secrets.BSKY_APP_PASSWORD }}
