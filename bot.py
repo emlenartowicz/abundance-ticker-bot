@@ -299,8 +299,13 @@ def author_feed(token, did, limit=30, filt=None):
 
 def feed_has_prefix_today(token, did, prefix):
     today = dt.datetime.now(BRUSSELS).date()
-    for item in author_feed(token, did, limit=10):
+    # posts_no_replies + explicit reply-skip: a summons REPLY starts with the same
+    # "{n} days remain" text as the daily post; counting it would suppress the real
+    # top-level daily post on any day a summons is answered first (the 07-25 gap).
+    for item in author_feed(token, did, limit=10, filt="posts_no_replies"):
         rec = item.get("post", {}).get("record", {})
+        if rec.get("reply"):
+            continue
         if rec.get("text", "").startswith(prefix) and \
                 brussels_date(rec.get("createdAt", "")) == today:
             return True
@@ -308,9 +313,11 @@ def feed_has_prefix_today(token, did, prefix):
 
 
 def feed_has_prefix_ever(token, did, prefix, year=None):
-    for item in author_feed(token, did, limit=30):
+    # Only the bot's own TOP-LEVEL posts count as "already posted" — never a
+    # summons reply (which, in the commenced state, carries the record line).
+    for item in author_feed(token, did, limit=30, filt="posts_no_replies"):
         rec = item.get("post", {}).get("record", {})
-        if not rec.get("text", "").startswith(prefix):
+        if rec.get("reply") or not rec.get("text", "").startswith(prefix):
             continue
         if year is None:
             return True
@@ -358,9 +365,9 @@ def cmd_post(args):
 def own_reply_exists(token, did, uri):
     try:
         th = api_get(token, "app.bsky.feed.getPostThread", {"uri": uri, "depth": 1})
-    except requests.HTTPError:
+    except requests.RequestException:
         # Can't verify (transient error, or the post was deleted): skip this
-        # round rather than risk a double reply. The loop retries next poll.
+        # round rather than risk a double reply. The next run retries.
         return True
     for r in th.get("thread", {}).get("replies", []) or []:
         if r.get("post", {}).get("author", {}).get("did") == did:
@@ -462,8 +469,19 @@ def cmd_mentions(args):
         text, _ = spoken_line(current_state())
         print("[dry-run] would reply with:\n" + text)
         return
-    token, did = session()
-    found, made, cap_hit = poll_once(token, did, args.dry_run)
+    try:
+        token, did = session()
+        found, made, cap_hit = poll_once(token, did, args.dry_run)
+    except requests.RequestException as e:
+        # Frequent, idempotent poll: a transient network/API failure (e.g. a
+        # Bluesky connect timeout) must NOT crash the job and email every cycle.
+        # Skip cleanly (exit 0); the next scheduled run retries. A genuinely
+        # persistent outage still surfaces via the once-a-day daily-post canary,
+        # which stays fail-loud — so mentions can be quiet without hiding a real
+        # break.
+        print("Mentions poll skipped (transient error): {!r}".format(e),
+              file=sys.stderr)
+        return
     print("Summons found: {}; new repl{}: {}."
           .format(found, "y" if made == 1 else "ies", made))
     if cap_hit:
