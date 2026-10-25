@@ -532,12 +532,8 @@ def follow_actor(token, did, subject):
                    "subject": subject, "createdAt": now_utc_iso()}})
 
 
-def cmd_discover(args):
-    existing = len(read_lines("follows.log"))
-    if existing >= FOLLOW_CEILING:
-        die("Follow ceiling ({}) reached; discovery paused for Em's review."
-            .format(FOLLOW_CEILING))
-
+def find_candidates():
+    """Read-only phase of discover: sign in, search, filter. Follows nothing."""
     token, did = session()
     queries = read_lines("queries.txt")
     never = set(read_lines("never-again.txt"))
@@ -572,6 +568,24 @@ def cmd_discover(args):
         profiles = api_get(token, "app.bsky.actor.getProfiles",
                            {"actors": batch}).get("profiles", [])
         qualified.extend(p for p in profiles if qualifies(p))
+    return token, did, candidates, qualified
+
+
+def cmd_discover(args):
+    existing = len(read_lines("follows.log"))
+    if existing >= FOLLOW_CEILING:
+        die("Follow ceiling ({}) reached; discovery paused for Em's review."
+            .format(FOLLOW_CEILING))
+
+    try:
+        token, did, candidates, qualified = find_candidates()
+    except requests.RequestException as e:
+        # Read-only phase, nothing followed yet: a transient network/API failure
+        # (e.g. a Bluesky 502 on getFollows, 2026-10-21) skips this cycle
+        # cleanly (exit 0), as mentions does; the next nightly run retries.
+        print("Discovery skipped (transient error): {!r}".format(e),
+              file=sys.stderr)
+        return
 
     room = min(MAX_FOLLOWS_PER_DAY, FOLLOW_CEILING - existing)
     to_follow = qualified[:room]

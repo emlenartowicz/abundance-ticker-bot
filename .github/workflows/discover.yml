@@ -23,11 +23,15 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install -r requirements.txt
-      - run: python bot.py discover ${{ inputs.dry_run && '--dry-run' || '' }}
+      - id: discover
+        run: python bot.py discover ${{ inputs.dry_run && '--dry-run' || '' }}
         env:
           BSKY_HANDLE: ${{ secrets.BSKY_HANDLE }}
           BSKY_APP_PASSWORD: ${{ secrets.BSKY_APP_PASSWORD }}
       - name: Commit follow log if changed
+        # Run even when discover exits non-zero (e.g. the ceiling die() after a
+        # batch), so follows already made are never lost from the log.
+        if: ${{ !cancelled() && steps.discover.outcome != 'skipped' }}
         run: |
           if ! git diff --quiet -- follows.log; then
             git config user.name "abundance-ticker-bot"
